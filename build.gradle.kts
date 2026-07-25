@@ -87,8 +87,10 @@ java {
 tasks.test {
     useJUnitPlatform()
 
-    // Forward -Dcucumber.* CLI properties to the test JVM so tag/name filters
-    // and the rerun file selector work (Gradle does not forward -D by default).
+    // Forward -Dcucumber.* CLI properties to the test JVM so tag/name filters work
+    // (Gradle does not forward -D by default). To re-run scenarios recorded in
+    // build/rerun.txt use -Dcucumber.filter.name; the @rerun-file features syntax
+    // is rejected by the JUnit Platform engine.
     System.getProperties().forEach { key, value ->
         val propertyName = key.toString()
         if (propertyName.startsWith("cucumber.")) {

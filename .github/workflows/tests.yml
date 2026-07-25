@@ -40,6 +40,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Allure results artifact
+        # continue-on-error masks step failure from failure(); check step outcome explicitly
         if: ${{ failure() || steps.run_tests.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
@@ -47,6 +48,7 @@ jobs:
           path: build/allure-results
 
       - name: Upload debug artifacts
+        # continue-on-error masks step failure from failure(); check step outcome explicitly
         if: ${{ failure() || steps.run_tests.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
