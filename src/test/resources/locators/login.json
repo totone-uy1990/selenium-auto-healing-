@@ -1,0 +1,30 @@
+{
+  "userNameField": {
+    "type": "xpath",
+    "value": "//label[text()='Username']/following-sibling::div//input"
+  },
+  "passwordField": {
+    "type": "xpath",
+    "value": "//label[text()='Password']/following-sibling::div//input"
+  },
+  "loginButton": {
+    "type": "xpath",
+    "value": "//button[text()='Login']"
+  },
+  "messageAdmin": {
+    "type": "xpath",
+    "value": "//div[contains(@class, 'MuiAlert-message') and contains(., 'Success')]"
+  },
+  "dashboardLocator": {
+    "type": "xpath",
+    "value": "//p[contains(text(), 'Dashboard')]"
+  },
+  "welcomeMessage": {
+    "type": "xpath",
+    "value": "//h5[contains(text(), 'Welcome')]"
+  },
+  "alerts": {
+    "type": "css",
+    "value": "div[role='alert']"
+  }
+}

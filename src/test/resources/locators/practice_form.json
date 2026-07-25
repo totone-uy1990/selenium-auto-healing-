@@ -1,0 +1,78 @@
+{
+  "firstNameInput": {
+    "type": "id",
+    "value": "firstName"
+  },
+  "lastNameInput": {
+    "type": "id",
+    "value": "lastName"
+  },
+  "userEmailInput": {
+    "type": "id",
+    "value": "userEmail"
+  },
+  "genderMaleRadio": {
+    "type": "css",
+    "value": "label[for='gender-radio-1']"
+  },
+  "genderFemaleRadio": {
+    "type": "css",
+    "value": "label[for='gender-radio-2']"
+  },
+  "genderOtherRadio": {
+    "type": "css",
+    "value": "label[for='gender-radio-3']"
+  },
+  "userNumberInput": {
+    "type": "id",
+    "value": "userNumber"
+  },
+  "dateOfBirthInput": {
+    "type": "id",
+    "value": "dateOfBirthInput"
+  },
+  "subjectsInput": {
+    "type": "id",
+    "value": "subjectsInput"
+  },
+  "hobbiesSportsCheckbox": {
+    "type": "css",
+    "value": "label[for='hobbies-checkbox-1']"
+  },
+  "hobbiesReadingCheckbox": {
+    "type": "css",
+    "value": "label[for='hobbies-checkbox-2']"
+  },
+  "hobbiesMusicCheckbox": {
+    "type": "css",
+    "value": "label[for='hobbies-checkbox-3']"
+  },
+  "uploadPictureInput": {
+    "type": "id",
+    "value": "uploadPicture"
+  },
+  "currentAddressTextarea": {
+    "type": "id",
+    "value": "currentAddress"
+  },
+  "stateInput": {
+    "type": "id",
+    "value": "react-select-3-input"
+  },
+  "cityInput": {
+    "type": "id",
+    "value": "react-select-4-input"
+  },
+  "submitButton": {
+    "type": "id",
+    "value": "submit"
+  },
+  "successModalTitle": {
+    "type": "id",
+    "value": "example-modal-sizes-title-lg"
+  },
+  "wasValidatedForm": {
+    "type": "css",
+    "value": "form.was-validated"
+  }
+}

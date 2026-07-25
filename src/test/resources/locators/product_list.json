@@ -1,0 +1,14 @@
+{
+  "btnAddToCartSmartphoneStand": {
+    "type": "xpath",
+    "value": "//h6[text()='Smartphone Stand']/ancestor::div[contains(@class,'MuiPaper-root')]//button[text()='Add to Cart']"
+  },
+  "btnCartIcon": {
+    "type": "xpath",
+    "value": "//span[text()='Cart']/ancestor::li | //button[contains(@aria-label, 'cart')] | //span[contains(text(), 'Cart')]/ancestor::button | //div[contains(@class,'MuiBadge-root')]/ancestor::button"
+  },
+  "tabTestCases": {
+    "type": "xpath",
+    "value": "//button[contains(text(),'Test Cases')]"
+  }
+}

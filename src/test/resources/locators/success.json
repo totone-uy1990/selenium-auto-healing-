@@ -1,0 +1,6 @@
+{
+  "msgStatus": {
+    "type": "xpath",
+    "value": "//h2 | //h4"
+  }
+}

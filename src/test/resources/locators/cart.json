@@ -1,0 +1,6 @@
+{
+  "btnProceedToAddress": {
+    "type": "xpath",
+    "value": "//button[contains(text(),'Proceed to Address')]"
+  }
+}

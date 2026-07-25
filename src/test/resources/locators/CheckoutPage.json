@@ -1,0 +1,26 @@
+{
+  "txtFirstName": {
+    "type": "name",
+    "value": "firstName"
+  },
+  "txtLastName": {
+    "type": "name",
+    "value": "lastName"
+  },
+  "txtAddress": {
+    "type": "name",
+    "value": "address"
+  },
+  "btnProceedToPayment": {
+    "type": "xpath",
+    "value": "//button[contains(text(),'Proceed to Payment')]"
+  },
+  "btnPayNow": {
+    "type": "xpath",
+    "value": "//button[contains(text(),'Pay Now')]"
+  },
+  "btnCancel": {
+    "type": "xpath",
+    "value": "//button[contains(text(),'Cancel')]"
+  }
+}

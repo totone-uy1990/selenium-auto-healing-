@@ -1,0 +1,86 @@
+name: Run tests and publish report
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+# Agregamos la programación de horarios
+  schedule:
+# Recuerda: Las horas están en UTC (Tiempo Universal Coordinado)
+    - cron: '0 9 * * *'   # Ejecución 1: 09:00 UTC
+    - cron: '0 15 * * *'  # Ejecución 2: 15:00 UTC
+    - cron: '0 21 * * *'  # Ejecución 3: 21:00 UTC
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run tests
+        id: run_tests
+        run: ./gradlew clean test
+        continue-on-error: true
+
+      - name: Setup Python for AI Diagnostic
+        if: steps.run_tests.outcome == 'failure'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Execute Gemini AI Diagnosis
+        if: steps.run_tests.outcome == 'failure'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          pip install -q -U google-generativeai requests
+          python scripts/gemini_diagnose.py
+
+      # 1. Descargar el reporte anterior en la carpeta 'old-pages'
+      - name: Load test report history
+        uses: actions/checkout@v4
+        if: always()
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: old-pages
+
+      # 2. Generar el reporte
+      # CORRECCIÓN: Le pasamos 'gh_pages: old-pages' para que la acción
+      # sepa de dónde sacar el historial automáticamente.
+      - name: Build test report
+        uses: simple-elf/allure-report-action@master
+        if: always()
+        with:
+          allure_results: build/allure-results
+          gh_pages: old-pages # <--- ESTO FALTABA o estaba mal configurado
+          allure_history: allure-history
+          keep_reports: 20
+
+      # 3. Publicar
+      - name: Publish test report
+        uses: peaceiris/actions-gh-pages@v3
+        if: always()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
+          commit_message: ${{ github.event.head_commit.message }}
