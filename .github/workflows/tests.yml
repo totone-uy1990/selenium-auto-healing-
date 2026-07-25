@@ -39,20 +39,19 @@ jobs:
         run: ./gradlew clean test
         continue-on-error: true
 
-      - name: Setup Python for AI Diagnostic
-        if: steps.run_tests.outcome == 'failure'
-        uses: actions/setup-python@v4
+      - name: Upload Allure results artifact
+        if: ${{ failure() || steps.run_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
         with:
-          python-version: '3.10'
+          name: allure-results
+          path: build/allure-results
 
-      - name: Execute Gemini AI Diagnosis
-        if: steps.run_tests.outcome == 'failure'
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          pip install -q -U google-generativeai requests
-          python scripts/gemini_diagnose.py
+      - name: Upload debug artifacts
+        if: ${{ failure() || steps.run_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts
+          path: build/debug-artifacts
 
       # 1. Descargar el reporte anterior en la carpeta 'old-pages'
       - name: Load test report history
