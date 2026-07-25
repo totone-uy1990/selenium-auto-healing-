@@ -86,7 +86,16 @@ java {
 
 tasks.test {
     useJUnitPlatform()
-    
+
+    // Forward -Dcucumber.* CLI properties to the test JVM so tag/name filters
+    // and the rerun file selector work (Gradle does not forward -D by default).
+    System.getProperties().forEach { key, value ->
+        val propertyName = key.toString()
+        if (propertyName.startsWith("cucumber.")) {
+            systemProperty(propertyName, value.toString())
+        }
+    }
+
     // Configuración para que Allure sepa dónde dejar los resultados
     systemProperty("allure.results.directory", "build/allure-results")
 

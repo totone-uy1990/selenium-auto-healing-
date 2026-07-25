@@ -11,6 +11,6 @@ import static io.cucumber.junit.platform.engine.Constants.*;
 @ConfigurationParameter(key = FEATURES_PROPERTY_NAME, value = "src/test/resources/features")
 @ConfigurationParameter(key = GLUE_PROPERTY_NAME, value = "steps")
 
-@ConfigurationParameter(key = PLUGIN_PROPERTY_NAME, value = "io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm")
+@ConfigurationParameter(key = PLUGIN_PROPERTY_NAME, value = "io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm, rerun:build/rerun.txt")
 public class TestRunner {
 }
