@@ -341,6 +341,13 @@ def quota_exceeded(quota_dir: Path, max_attempts: int = 3, now: datetime | None 
     return read_quota(quota_dir, now) >= max_attempts
 
 
+# Fail-open contract: any transport error (URLError/HTTPError/timeout are
+# OSError subclasses) or malformed API response shape (KeyError/IndexError/
+# TypeError from response drilling, ValueError/JSONDecodeError from payload
+# parsing) degrades the run to "unhealed" instead of crashing it.
+LLM_FAILURE_EXCEPTIONS = (OSError, ValueError, KeyError, IndexError, TypeError)
+
+
 class GitHubModelsClient:
     """GitHub Models inference API (OpenAI-compatible), auth via GITHUB_TOKEN."""
 
@@ -574,8 +581,8 @@ def run(
     client = llm_client or get_llm_client()
     try:
         outcome.proposal = extract_json_object(client.complete(prompt))
-    except (ValueError, KeyError, json.JSONDecodeError) as exc:
-        outcome.validation_error = f"unparseable LLM response: {exc}"
+    except LLM_FAILURE_EXCEPTIONS as exc:
+        outcome.validation_error = f"LLM call failed: {exc}"
         notifier.notify(
             f"Auto-heal: unhealed locator failure. Scenario: {candidate.scenario}. "
             f"Reason: {outcome.validation_error}"
