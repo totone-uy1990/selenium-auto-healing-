@@ -19,6 +19,7 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
@@ -302,6 +303,42 @@ def apply_locator_edit(
         new_type=new_type,
         new_value=new_value,
     )
+
+
+def quota_cache_key(now: datetime | None = None) -> str:
+    """UTC-day cache key shared with the Actions cache (``heal-quota-<date>``).
+
+    No restore-keys are used by the workflow, so a new UTC day is a cache
+    miss and the counter resets naturally.
+    """
+    moment = now or datetime.now(timezone.utc)
+    return f"heal-quota-{moment.astimezone(timezone.utc).date().isoformat()}"
+
+
+def _quota_file(quota_dir: Path, now: datetime | None = None) -> Path:
+    return Path(quota_dir) / f"{quota_cache_key(now)}.txt"
+
+
+def read_quota(quota_dir: Path, now: datetime | None = None) -> int:
+    """Read today's attempt count. Eviction/corruption fails open to 0."""
+    try:
+        return int(_quota_file(quota_dir, now).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def increment_quota(quota_dir: Path, now: datetime | None = None) -> int:
+    """Increment today's attempt count and return the new value."""
+    path = _quota_file(quota_dir, now)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new_count = read_quota(quota_dir, now) + 1
+    path.write_text(str(new_count), encoding="utf-8")
+    return new_count
+
+
+def quota_exceeded(quota_dir: Path, max_attempts: int = 3, now: datetime | None = None) -> bool:
+    """True when today's attempts already reached ``max_attempts``."""
+    return read_quota(quota_dir, now) >= max_attempts
 
 
 class GitHubModelsClient:
