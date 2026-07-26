@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -28,6 +29,29 @@ DEFAULT_LOCATORS_DIR = "src/test/resources/locators"
 DEFAULT_QUOTA_DIR = ".heal-quota"
 
 RESULT_FILE_SUFFIX = "-result.json"
+
+# Selenium By.toString() prefixes mapped to the locator JSON type enum
+# (id|name|xpath|css|classname|linktext). By types outside this map are not
+# healable because the locator JSON contract cannot express them.
+BY_TO_JSON_TYPE = {
+    "id": "id",
+    "name": "name",
+    "xpath": "xpath",
+    "cssSelector": "css",
+    "className": "classname",
+    "linkText": "linktext",
+}
+
+# BasePage embeds By.toString() inside a Spanish sentence; the locator value
+# is recovered by stripping these known trailing fragments.
+TRACE_VALUE_SUFFIXES = (
+    " tras el tiempo de espera configurado.",
+    " pasado el tiempo de espera configurado",
+)
+
+BY_PATTERN = re.compile(r"By\.(cssSelector|className|linkText|xpath|id|name):\s*(.+)$", re.MULTILINE)
+
+FRAMEWORK_EXCEPTION = "FrameworkException"
 
 
 @dataclass(frozen=True)
@@ -109,6 +133,60 @@ def load_results(results_dir: Path) -> list[ScenarioResult]:
         if result.status in {"failed", "broken"}:
             results.append(result)
     return results
+
+
+@dataclass(frozen=True)
+class Classification:
+    """Deterministic classification of one failed scenario.
+
+    ``kind`` is ``"locator"`` (healing-eligible) or ``"bug"`` (Slack-only,
+    never reaches the LLM). Locator fields are populated only for eligible
+    failures whose trace carries a mappable ``By.toString()``.
+    """
+
+    kind: str
+    scenario: str = ""
+    locator_type: str | None = None
+    locator_value: str | None = None
+    message: str = ""
+
+
+def classify_trace(trace: str) -> Classification:
+    """Classify a stack trace before any LLM call.
+
+    Only ``FrameworkException`` traces that embed a supported Selenium
+    ``By.toString()`` are locator-eligible. ``VerificationException`` and any
+    other exception — including FrameworkExceptions without a locator (e.g.
+    missing locator file) — are real bugs.
+    """
+    if FRAMEWORK_EXCEPTION not in trace:
+        return Classification(kind="bug")
+    match = BY_PATTERN.search(trace)
+    if not match:
+        return Classification(kind="bug")
+    by_type, raw_value = match.group(1), match.group(2).strip()
+    locator_value = raw_value
+    for suffix in TRACE_VALUE_SUFFIXES:
+        if locator_value.endswith(suffix):
+            locator_value = locator_value[: -len(suffix)].rstrip()
+            break
+    return Classification(
+        kind="locator",
+        locator_type=BY_TO_JSON_TYPE[by_type],
+        locator_value=locator_value,
+    )
+
+
+def classify_result(result: ScenarioResult) -> Classification:
+    """Classify a parsed Allure result, keeping the scenario name."""
+    classification = classify_trace(result.trace or result.message)
+    return Classification(
+        kind=classification.kind,
+        scenario=result.name,
+        locator_type=classification.locator_type,
+        locator_value=classification.locator_value,
+        message=result.message,
+    )
 
 
 class SlackNotifier:
