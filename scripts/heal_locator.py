@@ -260,6 +260,50 @@ def validate_proposal(
     return Validation(True)
 
 
+@dataclass(frozen=True)
+class LocatorEdit:
+    """Record of an applied locator edit; old values feed the PR body."""
+
+    file: str
+    key: str
+    old_type: str
+    old_value: str
+    new_type: str
+    new_value: str
+
+
+def apply_locator_edit(
+    locators_dir: Path,
+    key: str,
+    new_type: str,
+    new_value: str,
+    matches: list[LocatorMatch],
+) -> LocatorEdit:
+    """Replace one locator entry, returning the edit with old values retained.
+
+    The key must resolve to exactly one file (call ``validate_proposal``
+    first); anything else raises to avoid editing an ambiguous locator.
+    """
+    if len(matches) != 1:
+        raise ValueError(f"key '{key}' must match exactly one locator file, found {len(matches)}")
+    match = matches[0]
+    path = Path(locators_dir) / match.file
+    with open(path, encoding="utf-8") as handle:
+        entries = json.load(handle)
+    entries[key] = {"type": new_type, "value": new_value}
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(entries, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+    return LocatorEdit(
+        file=match.file,
+        key=key,
+        old_type=match.type,
+        old_value=match.value,
+        new_type=new_type,
+        new_value=new_value,
+    )
+
+
 class GitHubModelsClient:
     """GitHub Models inference API (OpenAI-compatible), auth via GITHUB_TOKEN."""
 
