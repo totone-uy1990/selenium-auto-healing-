@@ -53,6 +53,14 @@ BY_PATTERN = re.compile(r"By\.(cssSelector|className|linkText|xpath|id|name):\s*
 
 FRAMEWORK_EXCEPTION = "FrameworkException"
 
+# Locator JSON contract: "key": {"type": <enum>, "value": "..."}.
+ALLOWED_LOCATOR_TYPES = frozenset({"id", "name", "xpath", "css", "classname", "linktext"})
+MAX_LOCATOR_VALUE_LENGTH = 500
+
+GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
+ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
+LLM_TIMEOUT_SECONDS = 60
+
 
 @dataclass(frozen=True)
 class ScenarioResult:
@@ -186,6 +194,156 @@ def classify_result(result: ScenarioResult) -> Classification:
         locator_type=classification.locator_type,
         locator_value=classification.locator_value,
         message=result.message,
+    )
+
+
+@dataclass(frozen=True)
+class LocatorMatch:
+    """One locator entry found while scanning the locators directory."""
+
+    file: str
+    type: str
+    value: str
+
+
+@dataclass(frozen=True)
+class Validation:
+    """Result of validating an LLM proposal against the schema contract."""
+
+    ok: bool
+    error: str = ""
+
+
+def find_locator_entries(locators_dir: Path, key: str) -> list[LocatorMatch]:
+    """Find every locator entry named ``key`` across all JSON files."""
+    matches = []
+    for path in sorted(Path(locators_dir).glob("*.json")):
+        with open(path, encoding="utf-8") as handle:
+            entries = json.load(handle)
+        if key in entries:
+            entry = entries[key]
+            matches.append(
+                LocatorMatch(file=path.name, type=entry.get("type", ""), value=entry.get("value", ""))
+            )
+    return matches
+
+
+def validate_proposal(
+    proposal: dict,
+    *,
+    trace_type: str,
+    trace_value: str,
+    matches: list[LocatorMatch],
+) -> Validation:
+    """Validate an LLM ``{key, type, value}`` proposal before any file edit.
+
+    The key must exist in exactly one locator file whose type+value matches
+    the trace's ``By.toString()``; the proposed type must be in the JSON enum;
+    the value must be non-empty, at most 500 chars, and different from the
+    old value.
+    """
+    if len(matches) != 1:
+        return Validation(False, f"key must exist in exactly one locator file, found {len(matches)}")
+    match = matches[0]
+    if match.type != trace_type or match.value != trace_value:
+        return Validation(False, "matched locator does not match the trace's By.toString()")
+    proposed_type = str(proposal.get("type", "")).strip()
+    if proposed_type not in ALLOWED_LOCATOR_TYPES:
+        return Validation(False, f"type '{proposed_type}' is not in the locator type enum")
+    proposed_value = str(proposal.get("value", "")).strip()
+    if not proposed_value:
+        return Validation(False, "value must not be empty")
+    if len(proposed_value) > MAX_LOCATOR_VALUE_LENGTH:
+        return Validation(False, f"value exceeds {MAX_LOCATOR_VALUE_LENGTH} characters")
+    if proposed_value == match.value:
+        return Validation(False, "value is identical to the old value")
+    return Validation(True)
+
+
+class GitHubModelsClient:
+    """GitHub Models inference API (OpenAI-compatible), auth via GITHUB_TOKEN."""
+
+    endpoint = "https://models.github.ai/inference/chat/completions"
+    model = "openai/gpt-4o-mini"
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def build_request(self, prompt: str) -> tuple[dict, dict]:
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+        }
+        return body, headers
+
+    def complete(self, prompt: str) -> str:
+        body, headers = self.build_request(prompt)
+        data = _post_json(self.endpoint, body, headers)
+        return data["choices"][0]["message"]["content"]
+
+
+class AnthropicClient:
+    """Anthropic Messages API, used when ANTHROPIC_API_KEY is set."""
+
+    endpoint = "https://api.anthropic.com/v1/messages"
+    model = "claude-haiku-4-5"
+    anthropic_version = "2023-06-01"
+
+    def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
+
+    def build_request(self, prompt: str) -> tuple[dict, dict]:
+        body = {
+            "model": self.model,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        headers = {
+            "x-api-key": self._api_key,
+            "anthropic-version": self.anthropic_version,
+            "Content-Type": "application/json",
+        }
+        return body, headers
+
+    def complete(self, prompt: str) -> str:
+        body, headers = self.build_request(prompt)
+        data = _post_json(self.endpoint, body, headers)
+        return "".join(block.get("text", "") for block in data.get("content", []))
+
+
+def _post_json(endpoint: str, body: dict, headers: dict) -> dict:
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=LLM_TIMEOUT_SECONDS) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def get_llm_client(env: dict | None = None):
+    """Select the LLM provider.
+
+    GitHub Models is the zero-secret default via ``GITHUB_TOKEN``
+    (``models: read`` permission); setting ``ANTHROPIC_API_KEY`` swaps to
+    Anthropic. Raises when no credential is available.
+    """
+    source = os.environ if env is None else env
+    anthropic_key = source.get(ANTHROPIC_API_KEY_ENV)
+    if anthropic_key:
+        return AnthropicClient(anthropic_key)
+    github_token = source.get(GITHUB_TOKEN_ENV)
+    if github_token:
+        return GitHubModelsClient(github_token)
+    raise RuntimeError(
+        f"no LLM credential available: set {GITHUB_TOKEN_ENV} (GitHub Models) "
+        f"or {ANTHROPIC_API_KEY_ENV} (Anthropic)"
     )
 
 
