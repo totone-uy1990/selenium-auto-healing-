@@ -255,6 +255,26 @@ def find_locator_entries(locators_dir: Path, key: str) -> list[LocatorMatch]:
     return matches
 
 
+def find_keys_by_value(
+    locators_dir: Path, locator_type: str, value: str
+) -> list[tuple[str, LocatorMatch]]:
+    """Reverse-lookup: find every ``(key, match)`` whose type+value equals the
+    broken locator extracted from the trace.
+
+    This makes healing independent of LLM key hallucination: when exactly one
+    key carries the broken type+value, that key is used directly and the LLM
+    only proposes the new value.
+    """
+    resolved = []
+    for path, entries in _iter_locator_files(locators_dir):
+        for key, entry in entries.items():
+            if entry.get("type", "") == locator_type and entry.get("value", "") == value:
+                resolved.append(
+                    (key, LocatorMatch(file=path.name, type=locator_type, value=value))
+                )
+    return resolved
+
+
 def validate_proposal(
     proposal: dict,
     *,
@@ -615,7 +635,22 @@ def run(
         )
         return outcome
 
-    matches = find_locator_entries(Path(args.locators_dir), str(outcome.proposal.get("key", "")))
+    # Deterministic key resolution: when exactly one locator key carries the
+    # broken type+value extracted from the trace, use it directly (the LLM
+    # only proposes the new value). Zero or ambiguous reverse matches fall
+    # back to the LLM-proposed key path; the validation gate below is intact
+    # for both paths.
+    resolved = find_keys_by_value(
+        Path(args.locators_dir), candidate.locator_type, candidate.locator_value
+    )
+    if len(resolved) == 1:
+        key, match = resolved[0]
+        outcome.proposal["key"] = key
+        matches = [match]
+    else:
+        matches = find_locator_entries(
+            Path(args.locators_dir), str(outcome.proposal.get("key", ""))
+        )
     validation = validate_proposal(
         outcome.proposal,
         trace_type=candidate.locator_type,
