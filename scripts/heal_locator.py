@@ -124,7 +124,9 @@ def parse_result_file(path: Path) -> ScenarioResult:
         data = json.load(handle)
     if not isinstance(data, dict):
         raise ValueError(f"expected a JSON object, got {type(data).__name__}")
-    details = data.get("statusDetails") or {}
+    details = data.get("statusDetails")
+    if not isinstance(details, dict):
+        details = {}
     return ScenarioResult(
         name=data.get("name", ""),
         full_name=data.get("fullName", ""),

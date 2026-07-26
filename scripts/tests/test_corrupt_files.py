@@ -45,6 +45,24 @@ def test_load_results_skips_non_object_json(results_dir, capsys):
     assert "array-result.json" in capsys.readouterr().err
 
 
+def test_non_dict_status_details_does_not_abort_valid_results(results_dir):
+    # A parseable result file whose statusDetails is not an object (string,
+    # list, number) must not crash the run: its message/trace degrade to
+    # empty and the valid files are still processed.
+    make_result_file(results_dir, "Login with valid credentials", FRAMEWORK_TRACE)
+    (results_dir / "weird-result.json").write_text(
+        json.dumps(
+            {"name": "weird", "status": "failed", "statusDetails": "oops"}
+        ),
+        encoding="utf-8",
+    )
+    results = heal_locator.load_results(results_dir)
+    assert "Login with valid credentials" in [r.name for r in results]
+    weird = next(r for r in results if r.name == "weird")
+    assert weird.message == ""
+    assert weird.trace == ""
+
+
 def test_corrupt_result_file_does_not_abort_full_run(
     results_dir, locators_dir, tmp_path
 ):
