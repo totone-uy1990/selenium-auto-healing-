@@ -6,6 +6,7 @@ Slack is notified, and the summary JSON is still emitted.
 """
 
 import argparse
+import http.client
 import json
 import urllib.error
 from datetime import datetime, timezone
@@ -108,8 +109,58 @@ def test_malformed_api_response_shape_is_unhealed_and_notified(
     assert any("unhealed" in message.lower() for message in notifier.messages)
 
 
-def test_main_still_emits_summary_json_on_llm_failure(
-    monkeypatch, capsys, results_dir, locators_dir, tmp_path
+@pytest.mark.parametrize(
+    "non_object_payload",
+    [
+        ["not", "an", "object"],  # list top level -> AttributeError on .get
+        "plain string",  # string top level -> AttributeError on .get
+        None,  # null top level -> AttributeError on .get
+    ],
+    ids=["list-payload", "string-payload", "null-payload"],
+)
+def test_anthropic_non_object_response_is_unhealed_and_notified(
+    monkeypatch, non_object_payload, results_dir, locators_dir, tmp_path
+):
+    # AnthropicClient drills data.get("content", []): a valid-JSON response
+    # whose top level is not an object raises AttributeError, which must fail
+    # open exactly like any other malformed response shape.
+    monkeypatch.setattr(heal_locator, "_post_json", lambda *a, **k: non_object_payload)
+    client = heal_locator.AnthropicClient(api_key="fake-key")
+    make_result_file(results_dir, "Login with valid credentials", FRAMEWORK_TRACE)
+    notifier = FakeNotifier()
+    outcome = heal_locator.run(
+        _args(results_dir, locators_dir, tmp_path / "quota"),
+        llm_client=client,
+        notifier=notifier,
+        now=NOW,
+    )
+    assert outcome.edit is None
+    assert outcome.validation_error
+    assert any("unhealed" in message.lower() for message in notifier.messages)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        http.client.IncompleteRead(b"partial"),
+        http.client.BadStatusLine("garbage"),
+        http.client.RemoteDisconnected("closed"),
+    ],
+    ids=["incomplete-read", "bad-status-line", "remote-disconnected"],
+)
+def test_http_client_exception_is_unhealed_and_notified(
+    exc, results_dir, locators_dir, tmp_path
+):
+    # http.client.HTTPException is NOT an OSError subclass; transport errors
+    # of this family must be part of the fail-open contract too.
+    assert issubclass(type(exc), heal_locator.LLM_FAILURE_EXCEPTIONS)
+    outcome, notifier = _run_with_raising_client(exc, results_dir, locators_dir, tmp_path)
+    assert outcome.edit is None
+    assert outcome.validation_error
+    assert any("unhealed" in message.lower() for message in notifier.messages)
+
+
+def test_main_still_emits_summary_json_on_llm_failure(    monkeypatch, capsys, results_dir, locators_dir, tmp_path
 ):
     make_result_file(results_dir, "Login with valid credentials", FRAMEWORK_TRACE)
     monkeypatch.setattr(

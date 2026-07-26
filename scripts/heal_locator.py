@@ -12,6 +12,7 @@ engine plus the daily-quota counter.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -394,10 +395,21 @@ def quota_exceeded(quota_dir: Path, max_attempts: int = 3, now: datetime | None 
 
 
 # Fail-open contract: any transport error (URLError/HTTPError/timeout are
-# OSError subclasses) or malformed API response shape (KeyError/IndexError/
-# TypeError from response drilling, ValueError/JSONDecodeError from payload
-# parsing) degrades the run to "unhealed" instead of crashing it.
-LLM_FAILURE_EXCEPTIONS = (OSError, ValueError, KeyError, IndexError, TypeError)
+# OSError subclasses; IncompleteRead/BadStatusLine/RemoteDisconnected are
+# http.client.HTTPException subclasses, NOT OSError) or malformed API
+# response shape (KeyError/IndexError/TypeError from response drilling,
+# AttributeError when a valid-JSON response is not an object,
+# ValueError/JSONDecodeError from payload parsing) degrades the run to
+# "unhealed" instead of crashing it.
+LLM_FAILURE_EXCEPTIONS = (
+    OSError,
+    ValueError,
+    KeyError,
+    IndexError,
+    TypeError,
+    AttributeError,
+    http.client.HTTPException,
+)
 
 
 class GitHubModelsClient:
