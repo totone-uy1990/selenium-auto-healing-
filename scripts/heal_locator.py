@@ -122,6 +122,8 @@ def parse_result_file(path: Path) -> ScenarioResult:
     """Parse one Allure ``*-result.json`` file into a ScenarioResult."""
     with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError(f"expected a JSON object, got {type(data).__name__}")
     details = data.get("statusDetails") or {}
     return ScenarioResult(
         name=data.get("name", ""),
@@ -133,12 +135,20 @@ def parse_result_file(path: Path) -> ScenarioResult:
 
 
 def load_results(results_dir: Path) -> list[ScenarioResult]:
-    """Load every failed/broken Allure result in the directory."""
+    """Load every failed/broken Allure result in the directory.
+
+    Per-file isolation: a corrupt, unreadable, or non-object result file is
+    skipped with a stderr warning instead of aborting the whole run.
+    """
     if not results_dir.is_dir():
         raise FileNotFoundError(f"Allure results directory not found: {results_dir}")
     results = []
     for path in sorted(results_dir.glob(f"*{RESULT_FILE_SUFFIX}")):
-        result = parse_result_file(path)
+        try:
+            result = parse_result_file(path)
+        except (OSError, ValueError) as exc:
+            print(f"[load_results:skip] {path.name}: {exc}", file=sys.stderr)
+            continue
         if result.status in {"failed", "broken"}:
             results.append(result)
     return results
@@ -215,12 +225,28 @@ class Validation:
     error: str = ""
 
 
+def _iter_locator_files(locators_dir: Path):
+    """Yield ``(path, entries)`` for each readable locator JSON file.
+
+    Per-file isolation: a corrupt, unreadable, or non-object locator file is
+    skipped with a stderr warning instead of aborting the whole run.
+    """
+    for path in sorted(Path(locators_dir).glob("*.json")):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                entries = json.load(handle)
+            if not isinstance(entries, dict):
+                raise ValueError(f"expected a JSON object, got {type(entries).__name__}")
+        except (OSError, ValueError) as exc:
+            print(f"[locators:skip] {path.name}: {exc}", file=sys.stderr)
+            continue
+        yield path, entries
+
+
 def find_locator_entries(locators_dir: Path, key: str) -> list[LocatorMatch]:
     """Find every locator entry named ``key`` across all JSON files."""
     matches = []
-    for path in sorted(Path(locators_dir).glob("*.json")):
-        with open(path, encoding="utf-8") as handle:
-            entries = json.load(handle)
+    for path, entries in _iter_locator_files(locators_dir):
         if key in entries:
             entry = entries[key]
             matches.append(
