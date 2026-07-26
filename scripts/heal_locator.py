@@ -249,6 +249,8 @@ def find_locator_entries(locators_dir: Path, key: str) -> list[LocatorMatch]:
     for path, entries in _iter_locator_files(locators_dir):
         if key in entries:
             entry = entries[key]
+            if not isinstance(entry, dict):
+                continue
             matches.append(
                 LocatorMatch(file=path.name, type=entry.get("type", ""), value=entry.get("value", ""))
             )
@@ -268,6 +270,8 @@ def find_keys_by_value(
     resolved = []
     for path, entries in _iter_locator_files(locators_dir):
         for key, entry in entries.items():
+            if not isinstance(entry, dict):
+                continue
             if entry.get("type", "") == locator_type and entry.get("value", "") == value:
                 resolved.append(
                     (key, LocatorMatch(file=path.name, type=locator_type, value=value))

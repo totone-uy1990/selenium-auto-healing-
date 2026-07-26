@@ -73,6 +73,43 @@ def test_find_keys_by_value_matches_type_and_value(locators_dir):
     ]
 
 
+def test_find_keys_by_value_skips_non_dict_entries(locators_dir):
+    # A legacy/flat locator entry (valid JSON, but the value is not the
+    # {"type", "value"} object) must be skipped, not crash the lookup.
+    (locators_dir / "misc.json").write_text(
+        json.dumps({"legacyEntry": "//span"}),
+        encoding="utf-8",
+    )
+    resolved = heal_locator.find_keys_by_value(locators_dir, "xpath", BROKEN_VALUE)
+    assert [key for key, _ in resolved] == ["userNameField"]
+
+
+def test_find_locator_entries_skips_non_dict_entry(locators_dir):
+    (locators_dir / "misc.json").write_text(
+        json.dumps({"userNameField": "//span"}),
+        encoding="utf-8",
+    )
+    matches = heal_locator.find_locator_entries(locators_dir, "userNameField")
+    assert [(match.file, match.type) for match in matches] == [("login.json", "xpath")]
+
+
+def test_run_completes_with_non_dict_locator_entry(results_dir, locators_dir, tmp_path):
+    make_result_file(results_dir, "Login with valid credentials", FRAMEWORK_TRACE)
+    (locators_dir / "misc.json").write_text(
+        json.dumps({"legacyEntry": "//span"}),
+        encoding="utf-8",
+    )
+    proposal = {"key": "userNameField", "type": "css", "value": "#username-input"}
+    outcome = heal_locator.run(
+        _args(results_dir, locators_dir, tmp_path / "quota"),
+        llm_client=FakeClient(json.dumps(proposal)),
+        notifier=FakeNotifier(),
+        now=NOW,
+    )
+    assert outcome.edit is not None
+    assert outcome.edit.key == "userNameField"
+
+
 def test_find_keys_by_value_ignores_same_value_with_wrong_type(locators_dir):
     # Same xpath string registered as "css" must not reverse-match.
     (locators_dir / "shadow.json").write_text(
