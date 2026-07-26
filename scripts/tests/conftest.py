@@ -2,6 +2,7 @@
 
 import json
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ def make_result_file(directory: Path, name: str, trace: str, status: str = "fail
         "status": status,
         "statusDetails": {"message": trace.splitlines()[0], "trace": trace},
     }
-    path = directory / f"11111111-2222-3333-4444-555555555555-result.json"
+    path = directory / f"{uuid.uuid4()}-result.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 

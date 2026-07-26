@@ -466,15 +466,166 @@ class SlackNotifier:
             return False
 
 
+@dataclass
+class Outcome:
+    """Result of one healing run, consumed by the workflow via stdout JSON."""
+
+    edit: LocatorEdit | None = None
+    proposal: dict | None = None
+    validation_error: str = ""
+    bugs: list[Classification] = field(default_factory=list)
+    pending: list[Classification] = field(default_factory=list)
+    quota_blocked: bool = False
+    quota_count: int = 0
+    dry_run: bool = False
+
+
+def extract_json_object(text: str) -> dict:
+    """Extract the first JSON object from an LLM response.
+
+    Tolerates surrounding prose and Markdown code fences.
+    """
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("LLM response contains no JSON object")
+    return json.loads(text[start : end + 1])
+
+
+def build_llm_prompt(classification: Classification, dom: str, message: str) -> str:
+    """Build the healing prompt: broken locator, failure message, DOM context."""
+    return (
+        "A Selenium test failed because a locator no longer matches the DOM.\n"
+        f"Scenario: {classification.scenario}\n"
+        f"Broken locator type: {classification.locator_type}\n"
+        f"Broken locator value: {classification.locator_value}\n"
+        f"Failure message: {message}\n\n"
+        "Current DOM:\n"
+        f"{dom}\n\n"
+        "Propose a replacement locator that uniquely matches the same element.\n"
+        'Respond with ONLY a JSON object: {"key": "<locator key>", '
+        '"type": "id|name|xpath|css|classname|linktext", "value": "<new locator>"}.\n'
+        f'The key must be "{classification.scenario}"\'s broken locator key if known, '
+        "otherwise your best candidate."
+    )
+
+
+def run(
+    args: argparse.Namespace,
+    llm_client=None,
+    notifier: SlackNotifier | None = None,
+    now: datetime | None = None,
+) -> Outcome:
+    """Orchestrate classification -> quota gate -> LLM -> validate -> edit.
+
+    ``llm_client`` and ``notifier`` are injection seams for tests; in
+    production they resolve from the environment. Dry-run never edits files
+    and never resolves a real client. Only one failure is healed per run
+    (first eligible, lexical order); extra eligible failures are reported as
+    pending. The quota is consumed by the workflow via ``--quota-increment``
+    only after a verified green re-run.
+    """
+    notifier = notifier or SlackNotifier.from_env()
+
+    if args.quota_increment:
+        count = increment_quota(Path(args.quota_dir), now)
+        return Outcome(quota_count=count)
+
+    outcome = Outcome(dry_run=args.dry_run)
+    results = load_results(Path(args.allure_results))
+    classifications = [classify_result(result) for result in results]
+
+    outcome.bugs = [c for c in classifications if c.kind == "bug"]
+    for bug in outcome.bugs:
+        notifier.notify(
+            f"Auto-heal: real bug detected (no fix attempted). "
+            f"Scenario: {bug.scenario}. Exception: {bug.message}"
+        )
+
+    eligible = sorted(
+        (c for c in classifications if c.kind == "locator"), key=lambda c: c.scenario
+    )
+    if not eligible:
+        return outcome
+
+    candidate, outcome.pending = eligible[0], eligible[1:]
+    for extra in outcome.pending:
+        notifier.notify(
+            f"Auto-heal: locator failure pending (one heal per run). Scenario: {extra.scenario}."
+        )
+
+    if quota_exceeded(Path(args.quota_dir), max_attempts=args.max_attempts, now=now):
+        outcome.quota_blocked = True
+        notifier.notify(
+            f"Auto-heal: daily quota of {args.max_attempts} healing attempts reached. "
+            f"Scenario left unhealed: {candidate.scenario}."
+        )
+        return outcome
+
+    dom = ""
+    if args.dom_file and Path(args.dom_file).is_file():
+        dom = Path(args.dom_file).read_text(encoding="utf-8")
+    prompt = build_llm_prompt(candidate, dom, candidate.message)
+
+    if args.dry_run and llm_client is None:
+        print(f"[dry-run] would call LLM with prompt:\n{prompt}")
+        return outcome
+
+    client = llm_client or get_llm_client()
+    try:
+        outcome.proposal = extract_json_object(client.complete(prompt))
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        outcome.validation_error = f"unparseable LLM response: {exc}"
+        notifier.notify(
+            f"Auto-heal: unhealed locator failure. Scenario: {candidate.scenario}. "
+            f"Reason: {outcome.validation_error}"
+        )
+        return outcome
+
+    matches = find_locator_entries(Path(args.locators_dir), str(outcome.proposal.get("key", "")))
+    validation = validate_proposal(
+        outcome.proposal,
+        trace_type=candidate.locator_type,
+        trace_value=candidate.locator_value,
+        matches=matches,
+    )
+    if not validation.ok:
+        outcome.validation_error = validation.error
+        notifier.notify(
+            f"Auto-heal: unhealed locator failure. Scenario: {candidate.scenario}. "
+            f"Reason: {validation.error}"
+        )
+        return outcome
+
+    if args.dry_run:
+        print(f"[dry-run] validated proposal: {outcome.proposal}")
+        return outcome
+
+    outcome.edit = apply_locator_edit(
+        Path(args.locators_dir),
+        str(outcome.proposal["key"]),
+        str(outcome.proposal["type"]).strip(),
+        str(outcome.proposal["value"]).strip(),
+        matches,
+    )
+    return outcome
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    notifier = SlackNotifier.from_env()
-    results = load_results(Path(args.allure_results))
-    print(f"Loaded {len(results)} failed scenario result(s).")
-    for result in results:
-        print(f"- {result.name} [{result.status}]")
-    if not results:
-        notifier.notify("Auto-heal: no failed scenarios found in Allure results.")
+    outcome = run(args)
+    summary = {
+        "healed": outcome.edit is not None,
+        "edit": outcome.edit.__dict__ if outcome.edit else None,
+        "proposal": outcome.proposal,
+        "validation_error": outcome.validation_error,
+        "bugs": [bug.scenario for bug in outcome.bugs],
+        "pending": [extra.scenario for extra in outcome.pending],
+        "quota_blocked": outcome.quota_blocked,
+        "quota_count": outcome.quota_count,
+        "dry_run": outcome.dry_run,
+    }
+    print(json.dumps(summary))
     return 0
 
 
