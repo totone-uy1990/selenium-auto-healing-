@@ -205,3 +205,18 @@ jobs:
           MESSAGE="Auto-heal: verification re-run failed for key ${EDIT_KEY}; no PR created. Run: ${RUN_URL}"
           PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$MESSAGE")
           curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+
+      # Distinct from the red-re-run notification above: the re-run was green
+      # but delivery itself failed (e.g. the healing branch already exists on
+      # a re-run and the push is rejected as non-fast-forward). Without this
+      # step, a verified heal would vanish silently.
+      - name: Notify Slack on failed delivery
+        if: steps.heal.outputs.healed == 'true' && steps.rerun_tests.outcome == 'success' && steps.deliver.outcome == 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          EDIT_KEY: ${{ steps.heal.outputs.key }}
+        run: |
+          MESSAGE="Auto-heal: delivery failed for verified heal of key ${EDIT_KEY}; no PR created. Run: ${RUN_URL}"
+          PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$MESSAGE")
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"

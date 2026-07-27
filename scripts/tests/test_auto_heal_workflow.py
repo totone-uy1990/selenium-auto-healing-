@@ -192,6 +192,27 @@ def test_red_rerun_restores_locator_file(workflow: dict) -> None:
     )
 
 
+def test_deliver_failure_fires_distinct_slack_notification(workflow: dict) -> None:
+    """G3: if deliver_healing.sh fails (e.g. the healing branch already
+    exists on a re-run and the push is rejected), no Slack notification
+    fired before — delivery failures were silent. A dedicated step gated on
+    the deliver outcome must notify, distinct from the red-re-run one."""
+    steps = _steps(workflow)
+    notify = _find_step(
+        steps,
+        lambda s: "steps.deliver.outcome == 'failure'" in str(s.get("if", ""))
+        and "SLACK_WEBHOOK_URL" in str(s.get("env", {})),
+    )
+    # Distinct from the rerun-failure notification: it must require the
+    # deliver step to have actually run (green re-run) and failed.
+    condition = str(notify["if"])
+    assert "steps.rerun_tests.outcome == 'success'" in condition
+    # It is a Slack step, not a rerun/git step.
+    run_script = str(notify.get("run", ""))
+    assert "SLACK_WEBHOOK_URL" in run_script
+    assert "gradlew" not in run_script
+
+
 def test_github_output_uses_heredoc_for_multiline_safe_writes(workflow: dict) -> None:
     """G2: heal-step outputs include LLM-influenced old_value/new_value
     (validate_proposal allows newlines up to 500 chars), so the single-line
