@@ -11,6 +11,7 @@ contract that live in workflow YAML and cannot be executed locally:
 """
 
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -189,3 +190,23 @@ def test_red_rerun_restores_locator_file(workflow: dict) -> None:
         lambda s: "git restore" in str(s.get("run", ""))
         and "src/test/resources/locators" in str(s.get("run", "")),
     )
+
+
+def test_github_output_uses_heredoc_for_multiline_safe_writes(workflow: dict) -> None:
+    """G2: heal-step outputs include LLM-influenced old_value/new_value
+    (validate_proposal allows newlines up to 500 chars), so the single-line
+    ``name=value`` GITHUB_OUTPUT form would corrupt them. The workflow must
+    use the heredoc delimiter form (``name<<delimiter`` / value / delimiter)
+    per GitHub docs."""
+    steps = _steps(workflow)
+    engine = _find_step(
+        steps, lambda s: "scripts/heal_locator.py" in str(s.get("run", ""))
+    )
+    run_script = engine["run"]
+    assert "GITHUB_OUTPUT" in run_script
+    # Heredoc delimiter form: every output is written as name<<DELIMITER.
+    assert re.search(r"\w+\}?<<", run_script), (
+        "outputs must use the heredoc delimiter form for multiline safety"
+    )
+    # The vulnerable single-line form must be gone.
+    assert 'f"{name}={value}' not in run_script

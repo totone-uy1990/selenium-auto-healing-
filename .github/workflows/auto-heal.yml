@@ -96,7 +96,11 @@ jobs:
           }
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               for name, value in outputs.items():
-                  handle.write(f"{name}={value}\n")
+                  # Heredoc delimiter form (GitHub docs): LLM-influenced
+                  # old_value/new_value may contain newlines, which would
+                  # corrupt the single-line name=value form.
+                  delimiter = f"HEAL_OUTPUT_{name.upper()}_7f3a9c2e"
+                  handle.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
           EOF
 
       # -Dcucumber.features="@build/rerun.txt" is rejected by the Cucumber
