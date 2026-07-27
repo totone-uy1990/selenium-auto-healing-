@@ -35,15 +35,15 @@ Chain strategy: stacked-to-main
 
 ## Phase 2: Healing Engine (PR 2)
 
-- [ ] 2.1 Create `scripts/heal_locator.py` skeleton: arg parsing, `*-result.json` trace parser, Slack notifier (webhook from env only)
-- [ ] 2.2 RED: pytest classifier fixtures — `FrameworkException` → eligible + extract `By.toString()` type/value; `VerificationException`/other → bug, no LLM call
-- [ ] 2.3 GREEN: implement deterministic classifier in `heal_locator.py`
-- [ ] 2.4 RED: pytest schema validation — accept valid `{key,type,value}`; reject unknown key, wrong type enum, empty/>500-char value, value == old
-- [ ] 2.5 GREEN: implement `get_llm_client()` (GitHub Models default via `GITHUB_TOKEN`; Anthropic swap when `ANTHROPIC_API_KEY` set) + schema validator
-- [ ] 2.6 Implement locator JSON edit: match key in exactly one file under `src/test/resources/locators/`, retain old value for PR body
-- [ ] 2.7 RED: pytest quota counter — UTC-day cache key `heal-quota-<date>`, max 3, over-quota → Slack-only, eviction fails open
-- [ ] 2.8 GREEN: implement quota read/increment via Actions cache file
-- [ ] 2.9 Integration: LLM (mocked/fixture) → validated edit on fixture DOM; end-to-end script dry-run on fixture result JSONs
+- [x] 2.1 Create `scripts/heal_locator.py` skeleton: arg parsing, `*-result.json` trace parser, Slack notifier (webhook from env only)
+- [x] 2.2 RED: pytest classifier fixtures — `FrameworkException` → eligible + extract `By.toString()` type/value; `VerificationException`/other → bug, no LLM call
+- [x] 2.3 GREEN: implement deterministic classifier in `heal_locator.py`
+- [x] 2.4 RED: pytest schema validation — accept valid `{key,type,value}`; reject unknown key, wrong type enum, empty/>500-char value, value == old
+- [x] 2.5 GREEN: implement `get_llm_client()` (GitHub Models default via `GITHUB_TOKEN`; Anthropic swap when `ANTHROPIC_API_KEY` set) + schema validator
+- [x] 2.6 Implement locator JSON edit: match key in exactly one file under `src/test/resources/locators/`, retain old value for PR body
+- [x] 2.7 RED: pytest quota counter — UTC-day cache key `heal-quota-<date>`, max 3, over-quota → Slack-only, eviction fails open
+- [x] 2.8 GREEN: implement quota read/increment via Actions cache file
+- [x] 2.9 Integration: LLM (mocked/fixture) → validated edit on fixture DOM; end-to-end script dry-run on fixture result JSONs
 
 ## Phase 3: Workflow, Docs, and Validation (PR 3)
 
