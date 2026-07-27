@@ -134,6 +134,11 @@ jobs:
       - name: Create healing branch and PR
         id: deliver
         if: steps.heal.outputs.healed == 'true' && steps.rerun_tests.outcome == 'success'
+        # Same pattern as rerun_tests above: keep the job status green on
+        # failure so downstream outcome-gated steps (including the
+        # deliver-failure Slack notification) stay reachable; steps.deliver.outcome
+        # still reflects the real result. Slack is the operator signal.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}

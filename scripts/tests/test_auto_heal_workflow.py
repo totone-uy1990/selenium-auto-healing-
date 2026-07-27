@@ -213,6 +213,30 @@ def test_deliver_failure_fires_distinct_slack_notification(workflow: dict) -> No
     assert "gradlew" not in run_script
 
 
+def test_deliver_failure_notification_is_reachable(workflow: dict) -> None:
+    """G3-residual: a step ``if`` without a status check function gets an
+    implicit ``success()`` ANDed in by GitHub Actions. If the deliver step
+    fails the job (no ``continue-on-error``), ``success()`` is false and
+    the notify-on-deliver-failure step is always skipped — delivery
+    failures stay silent. Reachability requires either the established
+    ``rerun_tests`` pattern (``continue-on-error: true`` on deliver) or an
+    explicit ``failure()``/``always()`` in the notify condition."""
+    steps = _steps(workflow)
+    deliver = _find_step(
+        steps, lambda s: "scripts/deliver_healing.sh" in str(s.get("run", ""))
+    )
+    notify = _find_step(
+        steps,
+        lambda s: "steps.deliver.outcome == 'failure'" in str(s.get("if", "")),
+    )
+    condition = str(notify.get("if", ""))
+    has_status_check = "failure()" in condition or "always()" in condition
+    assert deliver.get("continue-on-error") is True or has_status_check, (
+        "deliver-failure Slack notification is unreachable: implicit success() "
+        "is false once the deliver step fails the job"
+    )
+
+
 def test_github_output_uses_heredoc_for_multiline_safe_writes(workflow: dict) -> None:
     """G2: heal-step outputs include LLM-influenced old_value/new_value
     (validate_proposal allows newlines up to 500 chars), so the single-line
