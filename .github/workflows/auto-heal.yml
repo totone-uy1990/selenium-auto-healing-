@@ -102,19 +102,24 @@ jobs:
       # -Dcucumber.features="@build/rerun.txt" is rejected by the Cucumber
       # JUnit Platform engine (design.md, Slice 1 finding); the re-run uses
       # exact, regex-escaped scenario names parsed from the Allure traces.
-      - name: Build rerun filter from failed scenarios
+      # The engine heals at most ONE locator failure per run, so the filter
+      # targets ONLY the healed scenario from the engine's summary JSON —
+      # re-running unhealed bug/pending failures would keep the verification
+      # red at the same SHA and deadlock delivery (G1).
+      - name: Build rerun filter from healed scenario
         id: rerun
         run: |
-          FILTER=$(python3 scripts/build_rerun_filter.py --allure-results build/allure-results | tail -n 1)
+          FILTER=$(python3 scripts/build_rerun_filter.py --allure-results build/allure-results --summary heal-summary.json | tail -n 1)
           echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
 
-      # Verification gate (design.md): re-run only the failed scenarios at the
+      # Verification gate (design.md): re-run only the healed scenario at the
       # failing SHA. Serial execution for determinism; NO `clean` (it would
       # delete the downloaded artifacts). SLACK_WEBHOOK_URL is deliberately
-      # NOT in this step's env (design.md line 60).
-      - name: Re-run failed scenarios
+      # NOT in this step's env (design.md line 60). An empty filter (nothing
+      # healed) skips the re-run gracefully instead of running everything.
+      - name: Re-run healed scenario
         id: rerun_tests
-        if: steps.heal.outputs.healed == 'true'
+        if: steps.heal.outputs.healed == 'true' && steps.rerun.outputs.filter != ''
         continue-on-error: true
         env:
           RERUN_FILTER: ${{ steps.rerun.outputs.filter }}

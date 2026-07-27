@@ -539,11 +539,17 @@ class SlackNotifier:
 
 @dataclass
 class Outcome:
-    """Result of one healing run, consumed by the workflow via stdout JSON."""
+    """Result of one healing run, consumed by the workflow via stdout JSON.
+
+    ``scenario`` is the name of the healed scenario (empty when nothing was
+    healed); the workflow feeds it to ``build_rerun_filter.py --summary`` so
+    the verification re-run targets ONLY the healed failure.
+    """
 
     edit: LocatorEdit | None = None
     proposal: dict | None = None
     validation_error: str = ""
+    scenario: str = ""
     bugs: list[Classification] = field(default_factory=list)
     pending: list[Classification] = field(default_factory=list)
     quota_blocked: bool = False
@@ -694,6 +700,7 @@ def run(
         str(outcome.proposal["value"]).strip(),
         matches,
     )
+    outcome.scenario = candidate.scenario
     return outcome
 
 
@@ -702,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     outcome = run(args)
     summary = {
         "healed": outcome.edit is not None,
+        "scenario": outcome.scenario,
         "edit": outcome.edit.__dict__ if outcome.edit else None,
         "proposal": outcome.proposal,
         "validation_error": outcome.validation_error,

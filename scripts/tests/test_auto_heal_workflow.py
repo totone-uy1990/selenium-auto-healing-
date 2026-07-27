@@ -158,6 +158,30 @@ def test_rerun_filter_is_built_from_allure_results(workflow: dict) -> None:
     _find_step(steps, lambda s: "scripts/build_rerun_filter.py" in str(s.get("run", "")))
 
 
+def test_rerun_filter_targets_healed_scenario_only(workflow: dict) -> None:
+    """G1: the engine heals at most one failure per run; the verification
+    re-run must filter to ONLY the healed scenario from the engine summary,
+    or unhealed bug/pending failures keep the re-run red forever."""
+    steps = _steps(workflow)
+    build = _find_step(
+        steps, lambda s: "scripts/build_rerun_filter.py" in str(s.get("run", ""))
+    )
+    assert "--summary heal-summary.json" in build["run"]
+
+
+def test_rerun_step_requires_nonempty_filter(workflow: dict) -> None:
+    """G1: with nothing healed the filter is empty; the re-run must then be
+    skipped gracefully (never run the whole suite, never deliver)."""
+    steps = _steps(workflow)
+    rerun = _find_step(
+        steps,
+        lambda s: "./gradlew" in str(s.get("run", "")) and "filter.name" in str(s.get("run", "")),
+    )
+    condition = str(rerun.get("if", ""))
+    assert "steps.heal.outputs.healed == 'true'" in condition
+    assert "steps.rerun.outputs.filter != ''" in condition
+
+
 def test_red_rerun_restores_locator_file(workflow: dict) -> None:
     steps = _steps(workflow)
     _find_step(

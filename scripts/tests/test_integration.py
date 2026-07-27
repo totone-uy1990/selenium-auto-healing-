@@ -72,6 +72,36 @@ def test_mocked_llm_proposal_is_validated_and_applied(results_dir, locators_dir,
     assert "username-input" in client.prompts[0]
 
 
+def test_healed_run_records_scenario_name_for_rerun_filter(
+    results_dir, locators_dir, tmp_path
+):
+    """G1: the engine's summary contract must identify the healed scenario so
+    the verification re-run can filter to ONLY that scenario (re-running
+    unhealed failures would deadlock delivery at the same SHA)."""
+    make_result_file(results_dir, "Login with valid credentials", FRAMEWORK_TRACE)
+    make_result_file(results_dir, "Success modal is shown", VERIFICATION_TRACE)
+    outcome = heal_locator.run(
+        _args(results_dir, locators_dir, tmp_path / "quota"),
+        llm_client=FakeClient(json.dumps(PROPOSAL)),
+        notifier=FakeNotifier(),
+        now=NOW,
+    )
+    assert outcome.edit is not None
+    assert outcome.scenario == "Login with valid credentials"
+
+
+def test_unhealed_run_records_no_scenario(results_dir, locators_dir, tmp_path):
+    make_result_file(results_dir, "Success modal is shown", VERIFICATION_TRACE)
+    outcome = heal_locator.run(
+        _args(results_dir, locators_dir, tmp_path / "quota"),
+        llm_client=ExplodingClient(),
+        notifier=FakeNotifier(),
+        now=NOW,
+    )
+    assert outcome.edit is None
+    assert outcome.scenario == ""
+
+
 def test_dry_run_proposes_without_editing(results_dir, locators_dir, tmp_path):
     make_result_file(results_dir, "Login with valid credentials", FRAMEWORK_TRACE)
     make_result_file(results_dir, "Success modal is shown", VERIFICATION_TRACE)
