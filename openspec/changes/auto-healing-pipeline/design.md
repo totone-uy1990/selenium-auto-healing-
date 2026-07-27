@@ -98,5 +98,5 @@ None. Healing is additive except `gemini_diagnose.py` removal. Rollback: disable
 
 ## Open Questions
 
-- [ ] GitHub Models free-tier rate limits vs 3 heals/day — verify model availability at apply time; Slack fallback covers throttling.
+- [x] GitHub Models free-tier rate limits vs 3 heals/day — RESOLVED in Slice 3 (task 3.7): 1 LLM call/attempt × max 3/day is assumed to fit the free tier; live verification not possible during apply. Assumption + Anthropic swap documented in `docs/auto-healing-setup.md`; engine fails open to Slack "unhealed" on throttling, so the fallback path is the documented behavior.
 - [x] `-Dcucumber.features` precedence — RESOLVED in Slice 1 (task 1.5): broken on JUnit Platform (rejects `@` syntax, unions with annotation); rerun strategy amended to `-Dcucumber.filter.name` with exact scenario names parsed from traces.
