@@ -65,12 +65,16 @@ def harness(tmp_path: Path) -> dict:
     (repo / "README.md").write_text("unrelated local change\n", encoding="utf-8")
 
     gh_log = tmp_path / "gh_calls.log"
+    gh_argv_log = tmp_path / "gh_argv.log"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     gh = fake_bin / "gh"
     gh.write_text(
         "#!/usr/bin/env bash\n"
         f'echo "$@" >> "{gh_log}"\n'
+        # Per-token argv log: lets tests verify flags and values arrive as
+        # separate argv tokens (no shell composition).
+        f'printf "%s\\n" "$@" >> "{gh_argv_log}"\n'
         "echo 'https://example.com/pull/42'\n",
         encoding="utf-8",
     )
@@ -85,6 +89,7 @@ def harness(tmp_path: Path) -> dict:
         "repo": repo,
         "origin": origin,
         "gh_log": gh_log,
+        "gh_argv_log": gh_argv_log,
         "body_file": body_file,
         "env": env,
     }
@@ -149,8 +154,19 @@ def test_pr_create_uses_explicit_head_and_base(harness: dict) -> None:
     assert "--base main" in call
     assert "--title" in call
     assert "--body-file" in call
-    # No shell-composed refspec: head/base are their own argv tokens.
-    assert f"--head {BRANCH} --base main" in call or "--base main --head" in call or True
+
+    # Real argv contract (G4): --head/--base and their values are separate
+    # argv tokens — no shell composition such as a single "--head X --base Y"
+    # token (which unquoted expansion like `gh pr create $FLAGS` would produce).
+    tokens = harness["gh_argv_log"].read_text(encoding="utf-8").splitlines()
+    assert tokens[0:2] == ["pr", "create"]
+    head_index = tokens.index("--head")
+    assert tokens[head_index + 1] == BRANCH
+    base_index = tokens.index("--base")
+    assert tokens[base_index + 1] == "main"
+    # No token merges a flag with its value or both flags into one string.
+    assert not any(token.startswith(("--head ", "--base ")) for token in tokens)
+    assert not any("--head" in token and "--base" in token for token in tokens)
 
 
 def test_pre_staged_extra_changes_abort_without_push_or_pr(harness: dict) -> None:
