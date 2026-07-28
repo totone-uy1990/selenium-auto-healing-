@@ -1,0 +1,227 @@
+name: Auto-heal locators
+
+# Healing pipeline (SDD change: auto-healing-pipeline). Triggers on any
+# completed Pipeline 1 run; only failed runs from this repository (never
+# forks) proceed. Serializes on the `auto-heal` concurrency group so the
+# daily quota counter cannot race.
+
+on:
+  workflow_run:
+    workflows: ["Run tests and publish report"]
+    types: [completed]
+
+concurrency:
+  group: auto-heal
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  models: read
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    steps:
+      # Threat matrix (git repository selection): pin the failing run's SHA,
+      # never the default-branch HEAD.
+      - name: Check out the failing commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download Allure results from the failed run
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results
+          path: build/allure-results
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download debug artifacts from the failed run
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: debug-artifacts
+          path: build/debug-artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Compute UTC-day quota key
+        run: echo "QUOTA_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
+
+      # actions/cache entries are immutable per key: restoring by the UTC-day
+      # prefix picks the latest counter save of the day; a new day misses.
+      - name: Restore daily heal quota
+        uses: actions/cache/restore@v4
+        with:
+          path: .heal-quota
+          key: heal-quota-${{ env.QUOTA_DATE }}-latest
+          restore-keys: heal-quota-${{ env.QUOTA_DATE }}-
+
+      - name: Run healing engine
+        id: heal
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          DOM_FILE=$(find build/debug-artifacts -type f \( -name '*.html' -o -name '*.dom' \) 2>/dev/null | head -n 1 || true)
+          ARGS=(--allure-results build/allure-results --locators-dir src/test/resources/locators --quota-dir .heal-quota)
+          if [ -n "$DOM_FILE" ]; then ARGS+=(--dom-file "$DOM_FILE"); fi
+          python3 scripts/heal_locator.py "${ARGS[@]}" > heal-summary.json
+          cat heal-summary.json
+          python3 - <<'EOF'
+          import json
+          import os
+
+          with open("heal-summary.json", encoding="utf-8") as handle:
+              summary = json.load(handle)
+          edit = summary.get("edit") or {}
+          outputs = {
+              "healed": str(bool(summary.get("healed"))).lower(),
+              "file": str(edit.get("file", "")),
+              "key": str(edit.get("key", "")),
+              "old_value": str(edit.get("old_value", "")),
+              "new_value": str(edit.get("new_value", "")),
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              for name, value in outputs.items():
+                  # Heredoc delimiter form (GitHub docs): LLM-influenced
+                  # old_value/new_value may contain newlines, which would
+                  # corrupt the single-line name=value form.
+                  delimiter = f"HEAL_OUTPUT_{name.upper()}_7f3a9c2e"
+                  handle.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
+          EOF
+
+      # -Dcucumber.features="@build/rerun.txt" is rejected by the Cucumber
+      # JUnit Platform engine (design.md, Slice 1 finding); the re-run uses
+      # exact, regex-escaped scenario names parsed from the Allure traces.
+      # The engine heals at most ONE locator failure per run, so the filter
+      # targets ONLY the healed scenario from the engine's summary JSON —
+      # re-running unhealed bug/pending failures would keep the verification
+      # red at the same SHA and deadlock delivery (G1).
+      - name: Build rerun filter from healed scenario
+        id: rerun
+        run: |
+          FILTER=$(python3 scripts/build_rerun_filter.py --allure-results build/allure-results --summary heal-summary.json | tail -n 1)
+          echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
+
+      # Verification gate (design.md): re-run only the healed scenario at the
+      # failing SHA. Serial execution for determinism; NO `clean` (it would
+      # delete the downloaded artifacts). SLACK_WEBHOOK_URL is deliberately
+      # NOT in this step's env (design.md line 60). An empty filter (nothing
+      # healed) skips the re-run gracefully instead of running everything.
+      - name: Re-run healed scenario
+        id: rerun_tests
+        if: steps.heal.outputs.healed == 'true' && steps.rerun.outputs.filter != ''
+        continue-on-error: true
+        env:
+          RERUN_FILTER: ${{ steps.rerun.outputs.filter }}
+        run: |
+          chmod +x gradlew
+          ./gradlew test "-Dcucumber.filter.name=$RERUN_FILTER" -Dcucumber.execution.parallel.enabled=false
+
+      - name: Create healing branch and PR
+        id: deliver
+        if: steps.heal.outputs.healed == 'true' && steps.rerun_tests.outcome == 'success'
+        # Same pattern as rerun_tests above: keep the job status green on
+        # failure so downstream outcome-gated steps (including the
+        # deliver-failure Slack notification) stay reachable; steps.deliver.outcome
+        # still reflects the real result. Slack is the operator signal.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EDIT_FILE_NAME: ${{ steps.heal.outputs.file }}
+          EDIT_KEY: ${{ steps.heal.outputs.key }}
+          OLD_VALUE: ${{ steps.heal.outputs.old_value }}
+          NEW_VALUE: ${{ steps.heal.outputs.new_value }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          SAFE_KEY=$(echo "$EDIT_KEY" | tr -cd '[:alnum:]._-')
+          BRANCH="auto-heal/${SAFE_KEY}-${HEAD_SHA:0:8}"
+          {
+            echo "## Auto-healed locator"
+            echo
+            echo "- File: \`src/test/resources/locators/${EDIT_FILE_NAME}\`"
+            echo "- Key: \`${EDIT_KEY}\`"
+            echo "- Change: \`${OLD_VALUE}\` -> \`${NEW_VALUE}\`"
+            echo "- Verified: failed scenarios re-ran green at ${HEAD_SHA:0:8}"
+            echo "- Triggering run: ${RUN_URL}"
+            echo
+            echo "Requires human review. No auto-merge."
+          } > pr-body.md
+          PR_URL=$(scripts/deliver_healing.sh \
+            --branch "$BRANCH" \
+            --base "$DEFAULT_BRANCH" \
+            --edit-file "src/test/resources/locators/${EDIT_FILE_NAME}" \
+            --title "fix(locators): heal ${SAFE_KEY}" \
+            --body-file pr-body.md | tail -n 1)
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Increment daily quota after verified heal
+        if: steps.deliver.outcome == 'success'
+        run: python3 scripts/heal_locator.py --quota-increment --quota-dir .heal-quota
+
+      - name: Save daily heal quota
+        if: steps.deliver.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .heal-quota
+          key: heal-quota-${{ env.QUOTA_DATE }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Notify Slack on healing PR
+        if: steps.deliver.outcome == 'success'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_URL: ${{ steps.deliver.outputs.pr_url }}
+          EDIT_KEY: ${{ steps.heal.outputs.key }}
+          OLD_VALUE: ${{ steps.heal.outputs.old_value }}
+          NEW_VALUE: ${{ steps.heal.outputs.new_value }}
+        run: |
+          MESSAGE="Auto-heal: locator healed. Key: ${EDIT_KEY}. Old -> new: \`${OLD_VALUE}\` -> \`${NEW_VALUE}\`. PR: ${PR_URL}"
+          PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$MESSAGE")
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+
+      - name: Revert locator edit on red re-run
+        if: steps.heal.outputs.healed == 'true' && steps.rerun_tests.outcome == 'failure'
+        run: git restore -- src/test/resources/locators
+
+      - name: Notify Slack on failed verification
+        if: steps.heal.outputs.healed == 'true' && steps.rerun_tests.outcome == 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          EDIT_KEY: ${{ steps.heal.outputs.key }}
+        run: |
+          MESSAGE="Auto-heal: verification re-run failed for key ${EDIT_KEY}; no PR created. Run: ${RUN_URL}"
+          PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$MESSAGE")
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+
+      # Distinct from the red-re-run notification above: the re-run was green
+      # but delivery itself failed (e.g. the healing branch already exists on
+      # a re-run and the push is rejected as non-fast-forward). Without this
+      # step, a verified heal would vanish silently.
+      - name: Notify Slack on failed delivery
+        if: steps.heal.outputs.healed == 'true' && steps.rerun_tests.outcome == 'success' && steps.deliver.outcome == 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          EDIT_KEY: ${{ steps.heal.outputs.key }}
+        run: |
+          MESSAGE="Auto-heal: delivery failed for verified heal of key ${EDIT_KEY}; no PR created. Run: ${RUN_URL}"
+          PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$MESSAGE")
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"

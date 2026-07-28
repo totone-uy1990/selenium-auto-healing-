@@ -47,10 +47,10 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Workflow, Docs, and Validation (PR 3)
 
-- [ ] 3.1 Create `.github/workflows/auto-heal.yml`: `workflow_run` on tests.yml `[completed]`, job `if: conclusion == 'failure'`; fork gate `head_repository.full_name == github.repository`; `concurrency: auto-heal` (no cancel); minimal permissions (`contents: write`, `pull-requests: write`, `actions: read`, `models: read`)
-- [ ] 3.2 Add steps: cross-run `actions/download-artifact@v4` (run-id + github-token), checkout `head_sha`, quota gate, run `heal_locator.py`, re-run gradle command, green → branch `auto-heal/<key>-<sha8>` + `gh pr create --head/--base` explicit + Slack + quota++; red → `git restore` + Slack; extras → Slack "pending"
-- [ ] 3.3 RED (threat matrix): staged diff contains exactly one locator JSON file; push targets healing branch only; PR head/base correct; checkout lands on failing SHA
-- [ ] 3.4 Create `docs/auto-healing-setup.md`: secrets (`SLACK_WEBHOOK_URL`, optional `ANTHROPIC_API_KEY`), permissions, <15-min quick path
-- [ ] 3.5 Create `.agent/skills/locator-healing-specialist/SKILL.md` (optional LLM prompt context)
-- [ ] 3.6 E2E manual checklist: break a locator on a branch → PR with only JSON change; break an assertion → Slack-only
-- [ ] 3.7 Resolve open questions: verify GitHub Models free-tier rate limits vs 3 heals/day; confirm `-Dcucumber.features` precedence result from 1.5
+- [x] 3.1 Create `.github/workflows/auto-heal.yml`: `workflow_run` on tests.yml `[completed]`, job `if: conclusion == 'failure'`; fork gate `head_repository.full_name == github.repository`; `concurrency: auto-heal` (no cancel); minimal permissions (`contents: write`, `pull-requests: write`, `actions: read`, `models: read`)
+- [x] 3.2 Add steps: cross-run `actions/download-artifact@v4` (run-id + github-token), checkout `head_sha`, quota gate, run `heal_locator.py`, re-run gradle command (`-Dcucumber.filter.name` from `scripts/build_rerun_filter.py`, serial, no clean), green → branch `auto-heal/<key>-<sha8>` + `gh pr create --head/--base` explicit (via `scripts/deliver_healing.sh`) + Slack + quota++; red → `git restore` + Slack; extras → Slack "pending"
+- [x] 3.3 RED→GREEN (threat matrix): `scripts/tests/test_deliver_healing.py` (behavioral git harness: staged diff = exactly one locator JSON, push targets healing branch only, PR head/base explicit, extra staged changes abort) + `scripts/tests/test_auto_heal_workflow.py` (checkout pins failing SHA, fork gate, permissions, no SLACK in re-run env)
+- [x] 3.4 Create `docs/auto-healing-setup.md`: secrets (`SLACK_WEBHOOK_URL`, optional `ANTHROPIC_API_KEY`), permissions, <15-min quick path, pytest note, GitHub Models rate-limit assumption + Slack fallback
+- [x] 3.5 Create `.agent/skills/locator-healing-specialist/SKILL.md` (optional LLM prompt context)
+- [x] 3.6 E2E manual checklist: `docs/auto-healing-e2e-checklist.md` (break locator → single-file JSON PR; break assertion → Slack-only; optional quota case). Manual only — no live E2E attempted
+- [x] 3.7 Resolve open questions: `-Dcucumber.features` precedence RESOLVED in Slice 1 (rerun via `-Dcucumber.filter.name`); GitHub Models free-tier assumption + Slack fallback documented in setup doc (design.md open questions all [x])
